@@ -1,0 +1,13 @@
+# Downloaded releases, extracted images and VM state (bin/setup-nextpi, bin/run-nextpi)
+/dist/
+
+# Stray images, archives and recordings anywhere else in the tree
+*.img
+*.qcow2
+*.tar.gz
+*.tar.gz.md5
+*.wav
+
+# Local tool settings
+.claude/settings.local.json
+.DS_Store

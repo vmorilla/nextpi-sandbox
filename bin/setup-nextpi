@@ -1,0 +1,115 @@
+#!/bin/bash
+# Download a NextPi release and prepare it for bin/run-nextpi.
+#
+#   bin/setup-nextpi                 install the latest release
+#   bin/setup-nextpi 1_93D           install a specific release
+#   bin/setup-nextpi --list          list the releases on the mirror
+#   bin/setup-nextpi --remove-archive  ...and delete the .tar.gz once extracted (saves ~5.7 GB)
+#
+# Everything lands in $NEXTPI_HOME (default: <repo>/dist):
+#   NextPi-<ver>.tar.gz(.md5)   the download (resumable)
+#   NextPi-<ver>/               the extracted release (image + docs)
+#   nextpi.img                  symlink to the release's SD card image
+#   boot/                       kernel.img + bcm2708-rpi-zero.dtb, copied out of the image
+#   overlay.qcow2               created by run-nextpi; reset here when the image changes
+
+set -euo pipefail
+
+MIRROR="${NEXTPI_MIRROR:-https://zx.xalior.com/NextPi2}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOME_DIR="${NEXTPI_HOME:-$ROOT/dist}"
+
+die()  { echo "setup-nextpi: $*" >&2; exit 1; }
+info() { echo "==> $*"; }
+
+md5_of() {
+  if command -v md5 >/dev/null; then md5 -q "$1"; else md5sum "$1" | cut -d' ' -f1; fi
+}
+
+list_releases() {
+  curl -fsSL "$MIRROR/" | grep -o 'href="NextPi-[^"]*\.tar\.gz"' \
+    | sed -E 's/href="NextPi-(.*)\.tar\.gz"/\1/' | sort -V
+}
+
+check_deps() {
+  local missing=()
+  for c in curl tar qemu-system-arm qemu-img mcopy; do
+    command -v "$c" >/dev/null || missing+=("$c")
+  done
+  if ((${#missing[@]})); then
+    die "missing: ${missing[*]}  (macOS: brew install qemu mtools)"
+  fi
+}
+
+VERSION=""
+REMOVE_ARCHIVE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --list) list_releases; exit 0 ;;
+    --remove-archive) REMOVE_ARCHIVE=1 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) die "unknown option: $1" ;;
+    *) VERSION="$1" ;;
+  esac
+  shift
+done
+
+check_deps
+mkdir -p "$HOME_DIR"
+cd "$HOME_DIR"
+
+if [[ -z "$VERSION" ]]; then
+  VERSION="$(list_releases | tail -1)"
+  [[ -n "$VERSION" ]] || die "could not find any release at $MIRROR/"
+  info "Latest release: $VERSION"
+fi
+NAME="NextPi-$VERSION"
+ARCHIVE="$NAME.tar.gz"
+
+# --- download + verify -------------------------------------------------------
+if [[ -d "$NAME" ]] && ls "$NAME"/*.img >/dev/null 2>&1; then
+  info "$NAME already extracted, skipping download"
+else
+  avail_kb=$(df -Pk . | awk 'NR==2 {print $4}')
+  ((avail_kb > 22 * 1024 * 1024)) || info "warning: under 22 GB free here; the archive is ~6 GB and the image ~15 GB"
+
+  curl -fsSL -o "$ARCHIVE.md5" "$MIRROR/$ARCHIVE.md5"
+  curl -fsSL -o "$ARCHIVE.txt" "$MIRROR/$ARCHIVE.txt" || true
+  expected=$(grep -oE '[0-9a-f]{32}' "$ARCHIVE.md5" | head -1)
+
+  if [[ ! -f "$ARCHIVE" ]] || [[ "$(md5_of "$ARCHIVE")" != "$expected" ]]; then
+    info "Downloading $ARCHIVE (resumable; rerun if interrupted)"
+    curl -fL -C - -o "$ARCHIVE" "$MIRROR/$ARCHIVE"
+    info "Verifying checksum"
+    [[ "$(md5_of "$ARCHIVE")" == "$expected" ]] || die "MD5 mismatch for $ARCHIVE; delete it and rerun"
+  else
+    info "$ARCHIVE already downloaded and verified"
+  fi
+
+  info "Extracting (the image is ~15 GB, this takes a while)"
+  tar -xzf "$ARCHIVE"
+  ((REMOVE_ARCHIVE)) && rm -f "$ARCHIVE"
+fi
+
+IMAGE=$(ls "$NAME"/*.img | head -1)
+[[ -f "$IMAGE" ]] || die "no .img found in $NAME/"
+
+# --- point nextpi.img at this release; reset the overlay if it changed -----------
+if [[ "$(readlink nextpi.img 2>/dev/null || true)" != "$IMAGE" ]]; then
+  if [[ -f overlay.qcow2 ]]; then
+    info "Image changed: discarding overlay.qcow2"
+    rm -f overlay.qcow2
+  fi
+  ln -sfn "$IMAGE" nextpi.img
+fi
+
+# --- copy the kernel + device tree out of the FAT boot partition ---------------
+# Partition 1 start sector is the little-endian u32 at MBR offset 454.
+start=$(od -An -t u4 -j 454 -N 4 "$IMAGE" | tr -d ' ')
+mkdir -p boot
+for f in kernel.img bcm2708-rpi-zero.dtb; do
+  mcopy -n -o -i "$IMAGE@@$((start * 512))" "::/$f" "boot/$f"
+done
+
+info "Ready: $NAME in $HOME_DIR"
+echo "    Start it with: $ROOT/bin/run-nextpi"

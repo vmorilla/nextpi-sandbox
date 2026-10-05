@@ -1,0 +1,64 @@
+#!/bin/bash
+# Boot NextPi (Pi Zero image) under QEMU's raspi0 machine. Run bin/setup-nextpi first.
+#
+#   bin/run-nextpi                 serial console (= the Next UART) on this terminal
+#   bin/run-nextpi --tcp 5577      serial console on tcp://127.0.0.1:5577 instead
+#                                  (for an emulator; `nc 127.0.0.1 5577` to peek by hand)
+#   bin/run-nextpi --wav out.wav   record Pi audio to a WAV file instead of the speakers
+#   bin/run-nextpi --reset         discard the overlay and start from the pristine image
+#
+# The release image is never written: changes go to $NEXTPI_HOME/overlay.qcow2.
+#
+# Pi audio: a QEMU usb-audio device is plugged into the Pi's USB port and made ALSA
+# card 0, so nextpi-play_* (which use the ALSA default device, the I2S DAC on real
+# hardware) come out of the host's speakers.
+#
+# Quit QEMU with: Ctrl-A then X (console mode), or Ctrl-C in TCP mode.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOME_DIR="${NEXTPI_HOME:-$ROOT/dist}"
+OVERLAY="$HOME_DIR/overlay.qcow2"
+SERIAL="mon:stdio"
+# Large host buffers: the emulated USB card delivers audio unevenly, and
+# CoreAudio clicks whenever its buffer runs dry.
+if [[ "$(uname)" == Darwin ]]; then
+  AUDIO="coreaudio,id=snd0,out.buffer-count=16,out.buffer-length=90000"
+else
+  AUDIO="${NEXTPI_AUDIODEV:-pa},id=snd0"
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reset) rm -f "$OVERLAY" ;;
+    --tcp)   SERIAL="tcp:127.0.0.1:$2,server=on,wait=off"; shift ;;
+    --wav)   AUDIO="wav,id=snd0,path=$2"; shift ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+for f in nextpi.img boot/kernel.img boot/bcm2708-rpi-zero.dtb; do
+  [[ -e "$HOME_DIR/$f" ]] || { echo "run-nextpi: $HOME_DIR/$f missing; run bin/setup-nextpi first" >&2; exit 1; }
+done
+
+# raspi SD cards must be a power-of-two size; the overlay is 16G over the ~14G raw image.
+# The backing path is relative to the overlay, so $NEXTPI_HOME can be moved.
+if [[ ! -f "$OVERLAY" ]]; then
+  qemu-img create -q -f qcow2 -b nextpi.img -F raw "$OVERLAY" 16G
+fi
+
+# dwc_otg.*: the Pi USB driver's FIQ path hangs enumeration under QEMU; disable it.
+# snd_usb_audio.index=0: make the USB sound card the ALSA default.
+exec qemu-system-arm \
+  -M raspi0 \
+  -kernel "$HOME_DIR/boot/kernel.img" \
+  -dtb "$HOME_DIR/boot/bcm2708-rpi-zero.dtb" \
+  -drive file="$OVERLAY",if=sd,format=qcow2 \
+  -append "console=ttyAMA0,115200 earlyprintk root=/dev/mmcblk0p2 rootfstype=ext4 rootwait fsck.repair=yes dwc_otg.fiq_enable=0 dwc_otg.fiq_fsm_enable=0 dwc_otg.nak_holdoff=0 snd_usb_audio.index=0" \
+  -audiodev "$AUDIO" \
+  -device usb-audio,audiodev=snd0,buffer=16384 \
+  -serial "$SERIAL" \
+  -display none
