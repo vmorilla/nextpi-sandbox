@@ -1,0 +1,109 @@
+#!/bin/bash
+# Run CSpect with its Pi UART (-com2) wired to the NextPi sandbox.
+#
+#   bin/run-cspect --sd next.img            boot CSpect from a Next SD card image
+#   bin/run-cspect --sd next.img -fullscreen   ...extra arguments go to CSpect
+#   bin/run-cspect --port 5577 ...          use another TCP port for the Pi console
+#
+# CSpect only opens serial devices, so a socat pseudo-terminal bridges it to the
+# Pi console served by `bin/run-nextpi --tcp`. If nothing is listening on the
+# port, NextPi is started in the background (log: $NEXTPI_HOME/qemu.log) and
+# stopped when CSpect exits; start `bin/run-nextpi --tcp 5577` yourself to keep
+# the Pi running across CSpect restarts (it takes ~1 minute to reach SUP>).
+#
+# At the NextZXOS prompt: .pisend -q, then e.g. .pisend -c nextpi-play_speech "Hello"
+#
+# Environment: CSPECT_HOME (default ~/bin/CSpect), NEXT_SD (default for --sd).
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOME_DIR="${NEXTPI_HOME:-$ROOT/dist}"
+CSPECT_HOME="${CSPECT_HOME:-$HOME/bin/CSpect}"
+SD="${NEXT_SD:-}"
+PORT=5577
+LINK="$HOME_DIR/cspect-uart"
+EXTRA=()
+
+die() { echo "run-cspect: $*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --sd)   SD="$2"; shift ;;
+    --port) PORT="$2"; shift ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) EXTRA+=("$1") ;;
+  esac
+  shift
+done
+
+for c in mono socat nc python3; do
+  command -v "$c" >/dev/null || die "missing: $c  (macOS: brew install socat; mono from mono-project.com)"
+done
+[[ -f "$CSPECT_HOME/CSpect.exe" ]] || die "no CSpect.exe in $CSPECT_HOME (set CSPECT_HOME)"
+[[ -n "$SD" ]] || die "no Next SD card image (use --sd or set NEXT_SD)"
+[[ -f "$SD" ]] || die "SD card image not found: $SD"
+SD="$(cd "$(dirname "$SD")" && pwd)/$(basename "$SD")"
+
+QEMU_PID=""
+SOCAT_PID=""
+cleanup() {
+  [[ -n "$SOCAT_PID" ]] && kill "$SOCAT_PID" 2>/dev/null || true
+  [[ -n "$QEMU_PID" ]] && kill "$QEMU_PID" 2>/dev/null || true
+  rm -f "$LINK"
+}
+trap cleanup EXIT
+
+if ! nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
+  echo "==> starting NextPi on 127.0.0.1:$PORT (log: $HOME_DIR/qemu.log)"
+  "$ROOT/bin/run-nextpi" --tcp "$PORT" >"$HOME_DIR/qemu.log" 2>&1 &
+  QEMU_PID=$!
+  for _ in $(seq 50); do
+    nc -z 127.0.0.1 "$PORT" 2>/dev/null && break
+    kill -0 "$QEMU_PID" 2>/dev/null || die "NextPi failed to start; see $HOME_DIR/qemu.log"
+    sleep 0.2
+  done
+fi
+
+# QEMU serves one client at a time: socat fails here if e.g. `nc` is still attached.
+rm -f "$LINK"
+socat pty,link="$LINK",raw,echo=0 tcp:127.0.0.1:"$PORT" &
+SOCAT_PID=$!
+for _ in $(seq 50); do
+  [[ -e "$LINK" ]] && break
+  kill -0 "$SOCAT_PID" 2>/dev/null || die "socat could not connect to 127.0.0.1:$PORT"
+  sleep 0.1
+done
+[[ -e "$LINK" ]] || die "socat did not create $LINK"
+# Hand CSpect the real /dev/ttysNNN rather than the symlink.
+TTY="$(readlink "$LINK")"
+echo "==> Pi UART on $TTY; waiting for SUP>"
+
+# socat buffers whatever the Pi prints until CSpect opens the tty (the whole boot
+# log, if it connected during boot), and that stale output stops .pisend finding
+# SUP>. Drain it here, nudging with CR until the Supervisor prompt answers.
+python3 - "$TTY" <<'EOF' || die "no SUP> from the Pi within 3 minutes; see $HOME_DIR/qemu.log"
+import os, sys, time, tty
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+tty.setraw(fd)
+def drain(secs):
+    buf, end = b"", time.time() + secs
+    while time.time() < end:
+        try:
+            buf += os.read(fd, 4096)
+        except BlockingIOError:
+            time.sleep(0.05)
+    return buf
+deadline = time.time() + 180
+while time.time() < deadline:
+    drain(0.5)
+    os.write(fd, b"\r")
+    if b"SUP>" in drain(3):
+        drain(0.5)
+        sys.exit(0)
+sys.exit(1)
+EOF
+echo "==> Pi ready"
+
+cd "$CSPECT_HOME"
+mono CSpect.exe -zxnext -basickeys -w2 -vsync -mmc="$SD" -com2="$TTY:115200" ${EXTRA[@]+"${EXTRA[@]}"}

@@ -50,6 +50,38 @@ already-extracted release is not downloaded again.
 
 The release image is never modified; all writes go to `dist/overlay.qcow2`.
 
+## bin/run-cspect
+
+Runs [CSpect](https://mdf200.itch.io/cspect) with its Pi UART (`-com2`) wired to
+the sandbox, so `.pisend` and other NextPi tools work from NextZXOS.
+
+```bash
+brew install socat                                  # plus mono from mono-project.com
+bin/run-cspect --sd ~/next-images/cspect-next.img   # a NextZXOS SD card image
+```
+
+| Command | Effect |
+|---|---|
+| `bin/run-cspect --sd IMG` | boot CSpect from `IMG`, starting NextPi if it isn't running |
+| `bin/run-cspect --sd IMG -fullscreen` | extra arguments are passed to CSpect |
+| `bin/run-cspect --port 5578 ...` | use another TCP port for the Pi console (default 5577) |
+
+`CSPECT_HOME` (default `~/bin/CSpect`) and `NEXT_SD` (default for `--sd`) can be
+set in the environment. CSpect only opens serial devices, so `socat` makes a
+pseudo-terminal bridged to `bin/run-nextpi --tcp`. The script discards the Pi's
+boot output and waits for the `SUP>` prompt before launching CSpect; output
+already waiting on the device would otherwise stop `.pisend -q` finding `SUP>`. A NextPi started by the script
+stops when CSpect exits; to keep the Pi up across CSpect restarts (boot takes ~1
+minute), run `bin/run-nextpi --tcp 5577` in another terminal first. Only one
+client can attach to the console port, so close any `nc` session.
+
+At the NextZXOS prompt (CSpect starts with `-basickeys`, so `.` types normally):
+
+```
+.pisend -q
+.pisend -c nextpi-play_speech "Hello from the Spectrum Next"
+```
+
 ## Trying out sound
 
 At the `SUP>` prompt:
@@ -105,6 +137,7 @@ few KB.
 ```
 bin/setup-nextpi   download + prepare a release
 bin/run-nextpi     boot it
+bin/run-cspect     run CSpect connected to it
 examples/          small test files (twinkle.mid)
 dist/              (git-ignored) archives, extracted releases, boot files, overlay
 ```
