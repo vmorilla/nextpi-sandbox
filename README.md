@@ -50,6 +50,24 @@ already-extracted release is not downloaded again.
 
 The release image is never modified; all writes go to `dist/overlay.qcow2`.
 
+## bin/run-jnext
+
+Runs [jnext](https://github.com/jorgegv/jnext) with its Raspberry Pi UART
+(`--pi-uart-pty`, UART 1) wired to the sandbox, so `.pisend` and the other
+NextPi tools work from NextZXOS. Needs a jnext build with `--pi-uart-pty`.
+
+```bash
+JNEXT=~/path/to/jnext bin/run-jnext            # extra arguments go to jnext
+```
+
+It starts NextPi if nothing listens on the port (default 5577, `--port` to
+change), waits for the Supervisor's `SUP>`, launches jnext, reads the pty path
+from its log and bridges it to QEMU with `socat`, logging the traffic to
+`dist/uart.log`. A NextPi started by the script stops when jnext exits; run
+`bin/run-nextpi --tcp 5577` in another terminal first to keep it up between
+runs. The guest reaches the Pi only after NextREG 0xA0 is set to 0x30, which
+NextPi's tools do themselves.
+
 ## bin/run-cspect
 
 Runs [CSpect](https://mdf200.itch.io/cspect) with its Pi UART (`-com2`) wired to
@@ -137,6 +155,7 @@ few KB.
 ```
 bin/setup-nextpi   download + prepare a release
 bin/run-nextpi     boot it
+bin/run-jnext      run jnext connected to it
 bin/run-cspect     run CSpect connected to it
 examples/          small test files (twinkle.mid)
 dist/              (git-ignored) archives, extracted releases, boot files, overlay
