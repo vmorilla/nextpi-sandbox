@@ -1,114 +1,36 @@
 #!/bin/bash
-# Run jnext with its Raspberry Pi UART (--pi-uart-pty) wired to the NextPi sandbox.
+# Run jnext with NextPi on its Raspberry Pi UART (UART 1). Run bin/setup-nextpi first.
 #
-#   bin/run-jnext                         boot jnext (its own SD card) with the Pi attached
-#   bin/run-jnext --sdcard next.img       ...extra arguments go to jnext
-#   bin/run-jnext --port 5577 ...         use another TCP port for the Pi console
+#   bin/run-jnext                    jnext with the sandbox's NextPi on UART 1
+#   bin/run-jnext --sdcard next.img  ...extra arguments go to jnext
 #
-# jnext allocates a pseudo-terminal for UART 1 and logs its path; socat bridges it
-# to the Pi console served by `bin/run-nextpi --tcp`. If nothing is listening on
-# the port, NextPi is started in the background (log: $NEXTPI_HOME/qemu.log) and
-# stopped when jnext exits; start `bin/run-nextpi --tcp 5577` yourself to keep
-# the Pi running across jnext restarts (it takes ~1 minute to reach SUP>).
+# jnext starts QEMU itself (--pi-qemu) on this sandbox's prepared directory,
+# wires the Pi's console to UART 1, and stops QEMU when it exits — so this is
+# just `jnext --pi-qemu "$NEXTPI_HOME" "$@"` with the checks in front.
+# NextPi takes ~1 minute to reach SUP>; then, at the NextZXOS prompt:
+#   .pisend -q
+#   .pisend -c nextpi-play_speech "Hello"
 #
-# At the NextZXOS prompt: .pisend -q, then e.g. .pisend -c nextpi-play_speech "Hello"
-# UART traffic in both directions is logged to $NEXTPI_HOME/uart.log.
-#
-# Environment: JNEXT (default: jnext on PATH) — a build with --pi-uart-pty.
+# Environment: JNEXT (default: jnext on PATH) — a build with --pi-qemu.
+# Don't run bin/run-nextpi at the same time: both use dist/overlay.qcow2.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOME_DIR="${NEXTPI_HOME:-$ROOT/dist}"
 JNEXT="${JNEXT:-jnext}"
-PORT=5577
-EXTRA=()
 
 die() { echo "run-jnext: $*" >&2; exit 1; }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --port) PORT="$2"; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) EXTRA+=("$1") ;;
-  esac
-  shift
-done
+case "${1:-}" in
+  -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
 
-for c in socat nc python3; do
-  command -v "$c" >/dev/null || die "missing: $c  (macOS: brew install socat)"
-done
 command -v "$JNEXT" >/dev/null || die "jnext not found (set JNEXT to the binary)"
-[[ "$("$JNEXT" --help 2>&1 || true)" == *--pi-uart-pty* ]] || die "$JNEXT has no --pi-uart-pty"
-
-QEMU_PID=""
-SOCAT_PID=""
-JNEXT_PID=""
-JNEXT_LOG="$(mktemp -t jnext-log)"
-cleanup() {
-  [[ -n "$JNEXT_PID" ]] && kill "$JNEXT_PID" 2>/dev/null || true
-  [[ -n "$SOCAT_PID" ]] && kill "$SOCAT_PID" 2>/dev/null || true
-  [[ -n "$QEMU_PID" ]] && kill "$QEMU_PID" 2>/dev/null || true
-  rm -f "$JNEXT_LOG"
-}
-trap cleanup EXIT
-
-if ! nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
-  echo "==> starting NextPi on 127.0.0.1:$PORT (log: $HOME_DIR/qemu.log)"
-  "$ROOT/bin/run-nextpi" --tcp "$PORT" >"$HOME_DIR/qemu.log" 2>&1 &
-  QEMU_PID=$!
-  for _ in $(seq 50); do
-    nc -z 127.0.0.1 "$PORT" 2>/dev/null && break
-    kill -0 "$QEMU_PID" 2>/dev/null || die "NextPi failed to start; see $HOME_DIR/qemu.log"
-    sleep 0.2
-  done
-fi
-
-# Wait for the Supervisor before jnext is attached, nudging with CR. QEMU serves
-# one client at a time, so this probe disconnects before socat connects.
-echo "==> waiting for SUP> from the Pi"
-python3 - "$PORT" <<'EOF' || die "no SUP> from the Pi within 3 minutes; see $HOME_DIR/qemu.log"
-import socket, sys, time
-deadline = time.time() + 180
-while True:
-    try:
-        s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2)
-        break
-    except OSError:
-        if time.time() > deadline: sys.exit(1)
-        time.sleep(1)
-s.settimeout(0.2)
-buf = b""
-while time.time() < deadline:
-    s.sendall(b"\r")
-    end = time.time() + 3
-    while time.time() < end:
-        try:
-            buf = (buf + s.recv(4096))[-512:]
-        except socket.timeout:
-            pass
-    if b"SUP>" in buf:
-        s.close()
-        sys.exit(0)
-sys.exit(1)
-EOF
-echo "==> Pi ready"
-
-"$JNEXT" --pi-uart-pty ${EXTRA[@]+"${EXTRA[@]}"} > >(tee "$JNEXT_LOG") 2>&1 &
-JNEXT_PID=$!
-
-TTY=""
-for _ in $(seq 600); do
-  TTY="$(grep -o 'pty /dev/[^ ;]*' "$JNEXT_LOG" | head -1 | cut -d' ' -f2 || true)"
-  [[ -n "$TTY" ]] && break
-  kill -0 "$JNEXT_PID" 2>/dev/null || die "jnext exited before attaching the Pi link"
-  sleep 0.1
+[[ "$("$JNEXT" --help 2>&1 || true)" == *--pi-qemu* ]] \
+  || die "$JNEXT has no --pi-qemu (it needs https://github.com/jorgegv/jnext/pull/310)"
+for f in nextpi.img boot/kernel.img boot/bcm2708-rpi-zero.dtb; do
+  [[ -e "$HOME_DIR/$f" ]] || die "$HOME_DIR/$f missing; run bin/setup-nextpi first"
 done
-[[ -n "$TTY" ]] || die "jnext did not report its Pi pty"
-echo "==> Pi UART on $TTY"
 
-socat -v "$TTY",raw,echo=0 tcp:127.0.0.1:"$PORT" 2>"$HOME_DIR/uart.log" &
-SOCAT_PID=$!
-
-wait "$JNEXT_PID" || true
-JNEXT_PID=""
+exec "$JNEXT" --pi-qemu "$HOME_DIR" "$@"

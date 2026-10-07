@@ -2,8 +2,17 @@
 
 Run [NextPi](https://wiki.specnext.dev/Pi:NextPi) — the Raspberry Pi Zero
 accelerator distribution for the ZX Spectrum Next — on a desktop machine with
-QEMU, with working audio and the serial console (the Next's Pi UART) on your
-terminal or a TCP port.
+QEMU, so that ZX Spectrum Next emulators can talk to a real NextPi over the
+Next's Pi UART: NextZXOS's own `.pisend`, the NextPi UI, and the speech, music
+and tape-streaming players all work, with the Pi's sound on your speakers.
+
+- **[jnext](https://github.com/jorgegv/jnext)** launches NextPi itself: give it
+  the directory this project prepares (`jnext --pi-qemu dist`) and it starts
+  QEMU, wires the Pi to UART 1 and stops QEMU when it exits.
+- **CSpect** is supported through `bin/run-cspect`, which bridges its serial
+  port to a NextPi this project starts.
+- On its own, `bin/run-nextpi` boots NextPi with its console on your terminal
+  or a TCP port.
 
 ## Requirements
 
@@ -18,7 +27,35 @@ On macOS:
 brew install qemu mtools
 ```
 
-## Quick start
+## Quick start with jnext
+
+```bash
+bin/setup-nextpi                 # download the latest release and prepare dist/
+jnext --pi-qemu dist             # or: bin/run-jnext
+```
+
+NextPi takes about a minute to boot. Then, at the NextZXOS command line:
+
+```
+.pisend -q
+.pisend -c nextpi-play_speech "Hello from the Spectrum Next"
+```
+
+`--pi-qemu` is proposed in [jorgegv/jnext#310](https://github.com/jorgegv/jnext/pull/310)
+and needs a jnext built from it until it is merged. Its companion options:
+
+| jnext option | Effect |
+|---|---|
+| `--pi-qemu DIR` | boot NextPi under QEMU from `DIR` (this project's `dist/`) and connect it to UART 1 |
+| `--pi-qemu-binary PATH` | the QEMU to run (default `qemu-system-arm` on `PATH`) |
+| `--pi-qemu-audio SPEC` | the Pi's sound: a QEMU audio driver (`coreaudio`, `pa`, `none`, …) or `wav:FILE` |
+
+jnext uses the same files as `bin/run-nextpi` — `dist/overlay.qcow2` for the
+Pi's changes and `dist/qemu.log` for QEMU's messages — so don't run both at once.
+Typing on a Mac: `"` is ⌘+P and `_` is ⌘+0 in jnext (Symbol Shift is the key Qt
+calls Ctrl, which on macOS is ⌘).
+
+## Quick start on its own
 
 ```bash
 bin/setup-nextpi      # download the latest release from zx.xalior.com and prepare it
@@ -52,21 +89,13 @@ The release image is never modified; all writes go to `dist/overlay.qcow2`.
 
 ## bin/run-jnext
 
-Runs [jnext](https://github.com/jorgegv/jnext) with its Raspberry Pi UART
-(`--pi-uart-pty`, UART 1) wired to the sandbox, so `.pisend` and the other
-NextPi tools work from NextZXOS. Needs a jnext build with `--pi-uart-pty`.
+`jnext --pi-qemu "$NEXTPI_HOME"` with checks in front: that jnext (`$JNEXT`,
+default `jnext` on `PATH`) has `--pi-qemu`, and that `bin/setup-nextpi` has
+prepared the directory. Extra arguments go to jnext:
 
 ```bash
-JNEXT=~/path/to/jnext bin/run-jnext            # extra arguments go to jnext
+JNEXT=~/path/to/jnext bin/run-jnext --sdcard ~/next-images/next.img
 ```
-
-It starts NextPi if nothing listens on the port (default 5577, `--port` to
-change), waits for the Supervisor's `SUP>`, launches jnext, reads the pty path
-from its log and bridges it to QEMU with `socat`, logging the traffic to
-`dist/uart.log`. A NextPi started by the script stops when jnext exits; run
-`bin/run-nextpi --tcp 5577` in another terminal first to keep it up between
-runs. The guest reaches the Pi only after NextREG 0xA0 is set to 0x30, which
-NextPi's tools do themselves.
 
 ## bin/run-cspect
 
@@ -155,7 +184,7 @@ few KB.
 ```
 bin/setup-nextpi   download + prepare a release
 bin/run-nextpi     boot it
-bin/run-jnext      run jnext connected to it
+bin/run-jnext      run jnext with NextPi on its Pi UART (jnext starts QEMU)
 bin/run-cspect     run CSpect connected to it
 examples/          small test files (twinkle.mid)
 dist/              (git-ignored) archives, extracted releases, boot files, overlay
