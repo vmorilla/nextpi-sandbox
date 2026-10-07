@@ -1,13 +1,13 @@
 # nextpi-sandbox
 
-Run [NextPi](https://wiki.specnext.dev/Pi:NextPi) — the Raspberry Pi Zero
-accelerator distribution for the ZX Spectrum Next — on a desktop machine with
+Run [NextPi](https://wiki.specnext.dev/Pi:NextPi) — the software that runs on
+the Raspberry Pi of the ZX Spectrum Next — on a desktop machine with
 QEMU, so that ZX Spectrum Next emulators can talk to a real NextPi over the
 Next's Pi UART: NextZXOS's own `.pisend`, the NextPi UI, and the speech, music
 and tape-streaming players all work, with the Pi's sound on your speakers.
 
 - **[jnext](https://github.com/jorgegv/jnext)** has this built in and does not
-  need this project: `jnext --nextpi` (or **Settings > Preferences > Pi Zero**)
+  need this project: `jnext --nextpi` (or **Settings > Preferences > NextPi**)
   downloads NextPi on first use, starts QEMU and wires the Pi to UART 1 itself.
 - **CSpect** is supported through `bin/run-cspect`, which bridges its serial
   port to a NextPi this project starts.
@@ -36,7 +36,7 @@ Nothing from this project is needed — jnext prepares and runs NextPi itself
 jnext --nextpi
 ```
 
-The first run offers to download NextPi (about 6 GB) into `~/.jnext/pizero`,
+The first run offers to download NextPi (about 6 GB) into `~/.jnext/nextpi`,
 with a progress bar; later runs start at once. NextPi then takes about a minute
 to boot. At the NextZXOS command line:
 
@@ -45,8 +45,8 @@ to boot. At the NextZXOS command line:
 .pisend -c nextpi-play_speech "Hello from the Spectrum Next"
 ```
 
-To keep it on, tick **Start the Pi Zero** under **Settings > Preferences > Pi
-Zero**, where the NextPi release (default `1_93D`, or `latest`), the directory,
+To keep it on, tick **Start NextPi** under **Settings > Preferences >
+NextPi**, where the NextPi release (default `1_93D`, or `latest`), the directory,
 the QEMU binary and the Pi's audio can also be changed. Typing on a Mac: `"` is
 ⌘+P and `_` is ⌘+0 in jnext (Symbol Shift is the key Qt calls Ctrl, which on
 macOS is ⌘).
@@ -167,7 +167,7 @@ few KB.
 - Networking (the raspi0 machine has none).
 - I2S audio into the Next's mixer: the Pi's audio goes to the host speakers
   rather than through the Next (so NextREG 0xA2 enable/mute have no effect).
-- Real-time speed: the emulated Pi is slower than a real Pi Zero.
+- Real-time speed: the emulated Pi is slower than the Next's real Raspberry Pi.
 
 ## Layout
 
