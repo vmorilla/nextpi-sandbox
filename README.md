@@ -7,7 +7,7 @@ Next's Pi UART: NextZXOS's own `.pisend`, the NextPi UI, and the speech, music
 and tape-streaming players all work, with the Pi's sound on your speakers.
 
 - **[jnext](https://github.com/jorgegv/jnext)** has this built in and does not
-  need this project: `jnext --pizero` (or **Settings > Preferences > Pi Zero**)
+  need this project: `jnext --nextpi` (or **Settings > Preferences > Pi Zero**)
   downloads NextPi on first use, starts QEMU and wires the Pi to UART 1 itself.
 - **CSpect** is supported through `bin/run-cspect`, which bridges its serial
   port to a NextPi this project starts.
@@ -33,7 +33,7 @@ Nothing from this project is needed — jnext prepares and runs NextPi itself
 (proposed in [jorgegv/jnext#310](https://github.com/jorgegv/jnext/pull/310)):
 
 ```bash
-jnext --pizero
+jnext --nextpi
 ```
 
 The first run offers to download NextPi (about 6 GB) into `~/.jnext/pizero`,
