@@ -6,9 +6,9 @@ QEMU, so that ZX Spectrum Next emulators can talk to a real NextPi over the
 Next's Pi UART: NextZXOS's own `.pisend`, the NextPi UI, and the speech, music
 and tape-streaming players all work, with the Pi's sound on your speakers.
 
-- **[jnext](https://github.com/jorgegv/jnext)** launches NextPi itself: give it
-  the directory this project prepares (`jnext --pi-qemu dist`) and it starts
-  QEMU, wires the Pi to UART 1 and stops QEMU when it exits.
+- **[jnext](https://github.com/jorgegv/jnext)** has this built in and does not
+  need this project: `jnext --pizero` (or **Settings > Preferences > Pi Zero**)
+  downloads NextPi on first use, starts QEMU and wires the Pi to UART 1 itself.
 - **CSpect** is supported through `bin/run-cspect`, which bridges its serial
   port to a NextPi this project starts.
 - On its own, `bin/run-nextpi` boots NextPi with its console on your terminal
@@ -27,33 +27,33 @@ On macOS:
 brew install qemu mtools
 ```
 
-## Quick start with jnext
+## With jnext
+
+Nothing from this project is needed — jnext prepares and runs NextPi itself
+(proposed in [jorgegv/jnext#310](https://github.com/jorgegv/jnext/pull/310)):
 
 ```bash
-bin/setup-nextpi                 # download the latest release and prepare dist/
-jnext --pi-qemu dist             # or: bin/run-jnext
+jnext --pizero
 ```
 
-NextPi takes about a minute to boot. Then, at the NextZXOS command line:
+The first run offers to download NextPi (about 6 GB) into `~/.jnext/pizero`,
+with a progress bar; later runs start at once. NextPi then takes about a minute
+to boot. At the NextZXOS command line:
 
 ```
 .pisend -q
 .pisend -c nextpi-play_speech "Hello from the Spectrum Next"
 ```
 
-`--pi-qemu` is proposed in [jorgegv/jnext#310](https://github.com/jorgegv/jnext/pull/310)
-and needs a jnext built from it until it is merged. Its companion options:
+To keep it on, tick **Start the Pi Zero** under **Settings > Preferences > Pi
+Zero**, where the NextPi release (default `1_93D`, or `latest`), the directory,
+the QEMU binary and the Pi's audio can also be changed. Typing on a Mac: `"` is
+⌘+P and `_` is ⌘+0 in jnext (Symbol Shift is the key Qt calls Ctrl, which on
+macOS is ⌘).
 
-| jnext option | Effect |
-|---|---|
-| `--pi-qemu DIR` | boot NextPi under QEMU from `DIR` (this project's `dist/`) and connect it to UART 1 |
-| `--pi-qemu-binary PATH` | the QEMU to run (default `qemu-system-arm` on `PATH`) |
-| `--pi-qemu-audio SPEC` | the Pi's sound: a QEMU audio driver (`coreaudio`, `pa`, `none`, …) or `wav:FILE` |
-
-jnext uses the same files as `bin/run-nextpi` — `dist/overlay.qcow2` for the
-Pi's changes and `dist/qemu.log` for QEMU's messages — so don't run both at once.
-Typing on a Mac: `"` is ⌘+P and `_` is ⌘+0 in jnext (Symbol Shift is the key Qt
-calls Ctrl, which on macOS is ⌘).
+How jnext runs NextPi is what this project worked out: the same QEMU `raspi0`
+machine, kernel command line and USB audio set-up described under
+[How it works](#how-it-works).
 
 ## Quick start on its own
 
@@ -86,16 +86,6 @@ already-extracted release is not downloaded again.
 | `bin/run-nextpi --reset` | throw away all changes and boot the pristine image |
 
 The release image is never modified; all writes go to `dist/overlay.qcow2`.
-
-## bin/run-jnext
-
-`jnext --pi-qemu "$NEXTPI_HOME"` with checks in front: that jnext (`$JNEXT`,
-default `jnext` on `PATH`) has `--pi-qemu`, and that `bin/setup-nextpi` has
-prepared the directory. Extra arguments go to jnext:
-
-```bash
-JNEXT=~/path/to/jnext bin/run-jnext --sdcard ~/next-images/next.img
-```
 
 ## bin/run-cspect
 
@@ -184,7 +174,6 @@ few KB.
 ```
 bin/setup-nextpi   download + prepare a release
 bin/run-nextpi     boot it
-bin/run-jnext      run jnext with NextPi on its Pi UART (jnext starts QEMU)
 bin/run-cspect     run CSpect connected to it
 examples/          small test files (twinkle.mid)
 dist/              (git-ignored) archives, extracted releases, boot files, overlay
